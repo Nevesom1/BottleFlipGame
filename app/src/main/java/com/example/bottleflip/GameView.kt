@@ -2,6 +2,8 @@ package com.example.bottleflip
 
 import android.content.Context
 import android.graphics.*
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.abs
@@ -13,6 +15,13 @@ class GameView(context: Context) : View(context) {
 
     private enum class State { READY, CHARGING, FLYING, LANDED, GAMEOVER }
     private var state = State.READY
+
+    // ---- Настройки (Сохранение рекорда) ----
+    private val prefs = context.getSharedPreferences("bottle_flip_prefs", Context.MODE_PRIVATE)
+    private var best = prefs.getInt("best_score", 0)
+
+    // ---- Звуки ----
+    private val toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
 
     // ---- Бутылка (мировые X, экранные Y) ----
     private var bottleX = 200f
@@ -50,14 +59,17 @@ class GameView(context: Context) : View(context) {
 
     private var landTimer = 0
     private var score = 0
-    private var best = 0
     private var initialized = false
+    
+    // Для пульсации текста
+    private var pulseTime = 0L
 
     // ---- Paints ----
     private val skyPaint = Paint()
     private val groundPaint = Paint().apply { color = Color.rgb(90, 170, 70); isAntiAlias = true }
     private val bottleBodyPaint = Paint().apply { isAntiAlias = true }
     private val waterPaint = Paint().apply { isAntiAlias = true }
+    private val shadowPaint = Paint().apply { color = Color.argb(80, 0, 0, 0); isAntiAlias = true }
     private val capPaint = Paint().apply { isAntiAlias = true; color = Color.rgb(220, 60, 60) }
     private val capHiPaint = Paint().apply { isAntiAlias = true; color = Color.argb(110, 255, 255, 255) }
     private val outlinePaint = Paint().apply {
@@ -89,6 +101,11 @@ class GameView(context: Context) : View(context) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!initialized) { initialized = true; reset() }
     }
+    
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        toneGen.release() // Освобождаем звуковой движок, чтобы не жрал батарею
+    }
 
     private fun reset() {
         platforms.clear()
@@ -117,6 +134,8 @@ class GameView(context: Context) : View(context) {
 
     // ============ UPDATE ============
     private fun update() {
+        pulseTime += 16
+
         if (state == State.CHARGING) {
             power = ((System.currentTimeMillis() - chargeStart).toFloat() / maxChargeMs)
                 .coerceIn(0f, 1f)
@@ -150,7 +169,12 @@ class GameView(context: Context) : View(context) {
 
     private fun gameOver() {
         state = State.GAMEOVER
-        if (score > best) best = score
+        if (score > best) {
+            best = score
+            // Сохраняем новый рекорд!
+            prefs.edit().putInt("best_score", best).apply()
+        }
+        toneGen.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200) // Звук проигрыша
     }
 
     private fun checkLanding() {
@@ -171,6 +195,8 @@ class GameView(context: Context) : View(context) {
                         state = State.LANDED
                         landTimer = 25
                         score++
+                        // Звук успешного приземления (веселый писк)
+                        toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 150) 
                     } else {
                         bottleY = platformTopY - bottomOff
                         bottleVY = 0f; bottleVX = 0f
@@ -207,6 +233,15 @@ class GameView(context: Context) : View(context) {
             drawPlatform(canvas, pX)
         }
 
+        // Тень от бутылки на платформе
+        val shadowY = platformTopY
+        val shadowScale = (1f - (shadowY - bottleY) / 800f).coerceIn(0.3f, 1f)
+        canvas.drawOval(
+            bottleX - camX - (bottleW/2) * shadowScale, shadowY - 10f,
+            bottleX - camX + (bottleW/2) * shadowScale, shadowY + 10f,
+            shadowPaint
+        )
+
         drawBottle(canvas)
 
         // HUD
@@ -222,8 +257,13 @@ class GameView(context: Context) : View(context) {
             canvas.drawRoundRect(bx, by, bx + bw * power, by + bh, 17f, 17f, powerFillPaint)
         }
 
-        if (state == State.READY)
+        if (state == State.READY) {
+            // Пульсирующий текст
+            val alpha = (128 + 127 * kotlin.math.sin(pulseTime / 300.0)).toInt()
+            smallPaint.alpha = alpha
             canvas.drawText("Зажми и отпусти", width / 2f, height - 210f, smallPaint)
+            smallPaint.alpha = 255 // Возвращаем как было
+        }
 
         if (state == State.GAMEOVER) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
@@ -241,7 +281,6 @@ class GameView(context: Context) : View(context) {
         val hw = platformW / 2
         val ry = platformW / 6f
 
-        // Боковая часть (градиент = цилиндр)
         platformSidePaint.shader = LinearGradient(
             screenX - hw, 0f, screenX + hw, 0f,
             intArrayOf(
@@ -254,7 +293,6 @@ class GameView(context: Context) : View(context) {
         )
         canvas.drawRect(screenX - hw, topY, screenX + hw, bottomY, platformSidePaint)
 
-        // Верх (эллипс)
         platformTopPaint.shader = RadialGradient(
             screenX - hw * 0.3f, topY - ry * 0.3f, platformW * 0.75f,
             intArrayOf(Color.rgb(170, 230, 250), Color.rgb(100, 170, 215)),
@@ -296,7 +334,6 @@ class GameView(context: Context) : View(context) {
             close()
         }
 
-        // Корпус (стеклянный цилиндр)
         bottleBodyPaint.shader = LinearGradient(
             -hw, 0f, hw, 0f,
             intArrayOf(
@@ -309,7 +346,6 @@ class GameView(context: Context) : View(context) {
         )
         canvas.drawPath(path, bottleBodyPaint)
 
-        // Вода (нижние 55%)
         canvas.save()
         canvas.clipPath(path)
         val waterTop = hh - bottleH * 0.55f
@@ -321,10 +357,8 @@ class GameView(context: Context) : View(context) {
         canvas.drawRect(-hw, waterTop, hw, hh, waterPaint)
         canvas.restore()
 
-        // Контур
         canvas.drawPath(path, outlinePaint)
 
-        // Крышка
         canvas.drawRect(-hw * 0.55f, capTop, hw * 0.55f, neckTop, capPaint)
         canvas.drawRect(-hw * 0.45f, capTop + 4f, -hw * 0.15f, neckTop - 2f, capHiPaint)
 
@@ -357,5 +391,7 @@ class GameView(context: Context) : View(context) {
         rotVel = minRotVel + (maxRotVel - minRotVel) * p
         state = State.FLYING
         power = 0f
+        // Звук броска (короткий клик)
+        toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
     }
 }
