@@ -26,5 +26,6 @@ android {
     }
 }
 dependencies {
-    // Зависимостей больше нет, игра использует только стандартный Android SDK
+    // Подключаем Google Mobile Ads (AdMob)
+    implementation 'com.google.android.gms:play-services-ads:22.6.0'
 }
