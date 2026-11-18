@@ -13,33 +13,26 @@ import kotlin.random.Random
 
 class GameView(context: Context) : View(context) {
 
-    private enum class State { READY, CHARGING, FLYING, LANDED, GAMEOVER }
-    private var state = State.READY
+    // ДОБАВЛЕН STATE.MENU
+    private enum class State { MENU, READY, CHARGING, FLYING, LANDED, GAMEOVER }
+    private var state = State.MENU // Игра начинается с меню!
 
-    // ---- Настройки (Сохранение рекорда) ----
     private val prefs = context.getSharedPreferences("bottle_flip_prefs", Context.MODE_PRIVATE)
     private var best = prefs.getInt("best_score", 0)
-
-    // ---- Звуки ----
     private val toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
 
-    // ---- Бутылка (мировые X, экранные Y) ----
     private var bottleX = 200f
     private var bottleY = 0f
     private var bottleVX = 0f
     private var bottleVY = 0f
     private var rot = 0f
     private var rotVel = 0f
-
-    // ---- Камера ----
     private var camX = 0f
 
-    // ---- Размеры ----
     private val bottleW = 56f
     private val bottleH = 170f
     private val platformW = 220f
 
-    // ---- Физика ----
     private val gravity = 1.2f
     private val launchVY = -30f
     private val minVX = 4f
@@ -48,23 +41,18 @@ class GameView(context: Context) : View(context) {
     private val maxRotVel = 24f
     private val uprightTol = 70f
 
-    // ---- Заряд ----
     private var chargeStart = 0L
     private var power = 0f
     private val maxChargeMs = 1000L
 
-    // ---- Платформы ----
-    private val platforms = mutableListOf<Float>()  // world X centers
+    private val platforms = mutableListOf<Float>()
     private var currentIdx = 0
-
     private var landTimer = 0
     private var score = 0
     private var initialized = false
-    
-    // Для пульсации текста
     private var pulseTime = 0L
 
-    // ---- Paints ----
+    // Paints
     private val skyPaint = Paint()
     private val groundPaint = Paint().apply { color = Color.rgb(90, 170, 70); isAntiAlias = true }
     private val bottleBodyPaint = Paint().apply { isAntiAlias = true }
@@ -84,6 +72,15 @@ class GameView(context: Context) : View(context) {
         color = Color.WHITE; textSize = 90f; textAlign = Paint.Align.CENTER; isAntiAlias = true
         setShadowLayer(8f, 0f, 4f, Color.BLACK)
     }
+    private val titlePaint = Paint().apply {
+        color = Color.WHITE; textSize = 120f; textAlign = Paint.Align.CENTER; isAntiAlias = true
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        setShadowLayer(10f, 0f, 5f, Color.BLACK)
+    }
+    private val buttonPaint = Paint().apply {
+        color = Color.rgb(255, 200, 0); isAntiAlias = true
+        setShadowLayer(10f, 0f, 5f, Color.argb(100, 0, 0, 0))
+    }
     private val smallPaint = Paint().apply {
         color = Color.WHITE; textSize = 48f; textAlign = Paint.Align.CENTER; isAntiAlias = true
         setShadowLayer(6f, 0f, 3f, Color.BLACK)
@@ -96,6 +93,7 @@ class GameView(context: Context) : View(context) {
     private val overlayPaint = Paint().apply { color = Color.argb(160, 0, 0, 0) }
 
     private val platformTopY: Float get() = height * 0.72f
+    private val adBannerHeight = 150f // Примерная высота, чтобы UI не залезал под баннер
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -104,7 +102,7 @@ class GameView(context: Context) : View(context) {
     
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        toneGen.release() // Освобождаем звуковой движок, чтобы не жрал батарею
+        toneGen.release()
     }
 
     private fun reset() {
@@ -132,13 +130,10 @@ class GameView(context: Context) : View(context) {
         rot = 0f; bottleVX = 0f; bottleVY = 0f
     }
 
-    // ============ UPDATE ============
     private fun update() {
         pulseTime += 16
-
         if (state == State.CHARGING) {
-            power = ((System.currentTimeMillis() - chargeStart).toFloat() / maxChargeMs)
-                .coerceIn(0f, 1f)
+            power = ((System.currentTimeMillis() - chargeStart).toFloat() / maxChargeMs).coerceIn(0f, 1f)
         }
 
         when (state) {
@@ -171,10 +166,9 @@ class GameView(context: Context) : View(context) {
         state = State.GAMEOVER
         if (score > best) {
             best = score
-            // Сохраняем новый рекорд!
             prefs.edit().putInt("best_score", best).apply()
         }
-        toneGen.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200) // Звук проигрыша
+        toneGen.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200)
     }
 
     private fun checkLanding() {
@@ -195,7 +189,6 @@ class GameView(context: Context) : View(context) {
                         state = State.LANDED
                         landTimer = 25
                         score++
-                        // Звук успешного приземления (веселый писк)
                         toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 150) 
                     } else {
                         bottleY = platformTopY - bottomOff
@@ -210,69 +203,83 @@ class GameView(context: Context) : View(context) {
         }
     }
 
-    // ============ DRAW ============
     override fun onDraw(canvas: Canvas) {
         update()
 
-        // Небо
-        skyPaint.shader = LinearGradient(
-            0f, 0f, 0f, height.toFloat(),
-            Color.rgb(70, 150, 235), Color.rgb(190, 225, 255),
-            Shader.TileMode.CLAMP
-        )
+        // Отрисовка фона (всегда)
+        skyPaint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), Color.rgb(70, 150, 235), Color.rgb(190, 225, 255), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), skyPaint)
+        canvas.drawRect(0f, platformTopY + platformW / 6f, width.toFloat(), height.toFloat(), groundPaint)
 
-        // Земля/пол
-        canvas.drawRect(0f, platformTopY + platformW / 6f,
-            width.toFloat(), height.toFloat(), groundPaint)
+        // Логика отрисовки в зависимости от состояния
+        if (state == State.MENU) {
+            drawMenu(canvas)
+        } else {
+            // Отрисовка игрового мира
+            for (pWorldX in platforms) {
+                val pX = pWorldX - camX
+                if (pX < -platformW || pX > width + platformW) continue
+                drawPlatform(canvas, pX)
+            }
 
-        // Платформы
-        for (pWorldX in platforms) {
-            val pX = pWorldX - camX
-            if (pX < -platformW || pX > width + platformW) continue
-            drawPlatform(canvas, pX)
-        }
+            val shadowY = platformTopY
+            val shadowScale = (1f - (shadowY - bottleY) / 800f).coerceIn(0.3f, 1f)
+            canvas.drawOval(bottleX - camX - (bottleW/2) * shadowScale, shadowY - 10f, bottleX - camX + (bottleW/2) * shadowScale, shadowY + 10f, shadowPaint)
 
-        // Тень от бутылки на платформе
-        val shadowY = platformTopY
-        val shadowScale = (1f - (shadowY - bottleY) / 800f).coerceIn(0.3f, 1f)
-        canvas.drawOval(
-            bottleX - camX - (bottleW/2) * shadowScale, shadowY - 10f,
-            bottleX - camX + (bottleW/2) * shadowScale, shadowY + 10f,
-            shadowPaint
-        )
+            drawBottle(canvas)
 
-        drawBottle(canvas)
+            // HUD
+            canvas.drawText(score.toString(), width / 2f, 150f, textPaint)
+            canvas.drawText("Рекорд: $best", width / 2f, 215f, smallPaint)
 
-        // HUD
-        canvas.drawText(score.toString(), width / 2f, 150f, textPaint)
-        canvas.drawText("Рекорд: $best", width / 2f, 215f, smallPaint)
+            if (state == State.CHARGING) {
+                val bw = width * 0.65f
+                val bx = (width - bw) / 2f
+                val by = height - adBannerHeight - 100f // Поднимаем полосу над баннером
+                val bh = 34f
+                canvas.drawRoundRect(bx, by, bx + bw, by + bh, 17f, 17f, powerBgPaint)
+                canvas.drawRoundRect(bx, by, bx + bw * power, by + bh, 17f, 17f, powerFillPaint)
+            }
 
-        if (state == State.CHARGING) {
-            val bw = width * 0.65f
-            val bx = (width - bw) / 2f
-            val by = height - 150f
-            val bh = 34f
-            canvas.drawRoundRect(bx, by, bx + bw, by + bh, 17f, 17f, powerBgPaint)
-            canvas.drawRoundRect(bx, by, bx + bw * power, by + bh, 17f, 17f, powerFillPaint)
-        }
+            if (state == State.READY) {
+                val alpha = (128 + 127 * sin(pulseTime / 300.0)).toInt()
+                smallPaint.alpha = alpha
+                canvas.drawText("Зажми и отпусти", width / 2f, height - adBannerHeight - 100f, smallPaint)
+                smallPaint.alpha = 255
+            }
 
-        if (state == State.READY) {
-            // Пульсирующий текст
-            val alpha = (128 + 127 * kotlin.math.sin(pulseTime / 300.0)).toInt()
-            smallPaint.alpha = alpha
-            canvas.drawText("Зажми и отпусти", width / 2f, height - 210f, smallPaint)
-            smallPaint.alpha = 255 // Возвращаем как было
-        }
-
-        if (state == State.GAMEOVER) {
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
-            canvas.drawText("Промах!", width / 2f, height / 2f - 60f, textPaint)
-            canvas.drawText("Счёт: $score", width / 2f, height / 2f + 40f, smallPaint)
-            canvas.drawText("Нажми для рестарта", width / 2f, height / 2f + 130f, smallPaint)
+            if (state == State.GAMEOVER) {
+                canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
+                canvas.drawText("Промах!", width / 2f, height / 2f - 60f, textPaint)
+                canvas.drawText("Счёт: $score", width / 2f, height / 2f + 40f, smallPaint)
+                canvas.drawText("Нажми для рестарта", width / 2f, height / 2f + 130f, smallPaint)
+            }
         }
 
         postInvalidateOnAnimation()
+    }
+
+    // НОВЫЙ МЕТОД ДЛЯ ОТРИСОВКИ МЕНЮ
+    private fun drawMenu(canvas: Canvas) {
+        canvas.drawText("BOTTLE", width / 2f, height / 2f - 200f, titlePaint)
+        canvas.drawText("FLIP", width / 2f, height / 2f - 80f, titlePaint)
+        
+        canvas.drawText("Рекорд: $best", width / 2f, height / 2f + 20f, smallPaint)
+
+        // Рисуем кнопку "Играть"
+        val btnW = 400f
+        val btnH = 120f
+        val btnX = width / 2f - btnW / 2
+        val btnY = height / 2f + 100f
+        
+        val rect = RectF(btnX, btnY, btnX + btnW, btnY + btnH)
+        canvas.drawRoundRect(rect, 30f, 30f, buttonPaint)
+        
+        val playTextPaint = Paint().apply {
+            color = Color.BLACK; textSize = 60f; textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        canvas.drawText("ИГРАТЬ", width / 2f, btnY + btnH / 2f + 20f, playTextPaint)
     }
 
     private fun drawPlatform(canvas: Canvas, screenX: Float) {
@@ -281,24 +288,10 @@ class GameView(context: Context) : View(context) {
         val hw = platformW / 2
         val ry = platformW / 6f
 
-        platformSidePaint.shader = LinearGradient(
-            screenX - hw, 0f, screenX + hw, 0f,
-            intArrayOf(
-                Color.rgb(70, 130, 190),
-                Color.rgb(150, 205, 245),
-                Color.rgb(70, 130, 190)
-            ),
-            floatArrayOf(0f, 0.4f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        platformSidePaint.shader = LinearGradient(screenX - hw, 0f, screenX + hw, 0f, intArrayOf(Color.rgb(70, 130, 190), Color.rgb(150, 205, 245), Color.rgb(70, 130, 190)), floatArrayOf(0f, 0.4f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(screenX - hw, topY, screenX + hw, bottomY, platformSidePaint)
 
-        platformTopPaint.shader = RadialGradient(
-            screenX - hw * 0.3f, topY - ry * 0.3f, platformW * 0.75f,
-            intArrayOf(Color.rgb(170, 230, 250), Color.rgb(100, 170, 215)),
-            floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        platformTopPaint.shader = RadialGradient(screenX - hw * 0.3f, topY - ry * 0.3f, platformW * 0.75f, intArrayOf(Color.rgb(170, 230, 250), Color.rgb(100, 170, 215)), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
         canvas.drawOval(screenX - hw, topY - ry, screenX + hw, topY + ry, platformTopPaint)
         canvas.drawOval(screenX - hw, topY - ry, screenX + hw, topY + ry, platformEdgePaint)
     }
@@ -310,7 +303,6 @@ class GameView(context: Context) : View(context) {
 
         val hw = bottleW / 2
         val hh = bottleH / 2
-
         val bodyBottom = hh
         val bodyTop = -hh * 0.40f
         val shoulderTop = -hh * 0.65f
@@ -334,26 +326,13 @@ class GameView(context: Context) : View(context) {
             close()
         }
 
-        bottleBodyPaint.shader = LinearGradient(
-            -hw, 0f, hw, 0f,
-            intArrayOf(
-                Color.rgb(150, 190, 220),
-                Color.WHITE,
-                Color.rgb(150, 190, 220)
-            ),
-            floatArrayOf(0f, 0.35f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        bottleBodyPaint.shader = LinearGradient(-hw, 0f, hw, 0f, intArrayOf(Color.rgb(150, 190, 220), Color.WHITE, Color.rgb(150, 190, 220)), floatArrayOf(0f, 0.35f, 1f), Shader.TileMode.CLAMP)
         canvas.drawPath(path, bottleBodyPaint)
 
         canvas.save()
         canvas.clipPath(path)
         val waterTop = hh - bottleH * 0.55f
-        waterPaint.shader = LinearGradient(
-            -hw, waterTop, hw, hh,
-            Color.rgb(85, 165, 225), Color.rgb(30, 100, 170),
-            Shader.TileMode.CLAMP
-        )
+        waterPaint.shader = LinearGradient(-hw, waterTop, hw, hh, Color.rgb(85, 165, 225), Color.rgb(30, 100, 170), Shader.TileMode.CLAMP)
         canvas.drawRect(-hw, waterTop, hw, hh, waterPaint)
         canvas.restore()
 
@@ -365,11 +344,17 @@ class GameView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    // ============ INPUT ============
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (state == State.READY) {
+                if (state == State.MENU) {
+                    // Проверяем, попал ли игрок по кнопке "Играть" (примерные координаты)
+                    val btnX = width / 2f - 200f
+                    val btnY = height / 2f + 100f
+                    if (event.x in btnX..(btnX + 400f) && event.y in btnY..(btnY + 120f)) {
+                        reset() // Запускаем игру
+                    }
+                } else if (state == State.READY) {
                     state = State.CHARGING
                     chargeStart = System.currentTimeMillis()
                     power = 0f
@@ -391,7 +376,6 @@ class GameView(context: Context) : View(context) {
         rotVel = minRotVel + (maxRotVel - minRotVel) * p
         state = State.FLYING
         power = 0f
-        // Звук броска (короткий клик)
         toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
     }
 }
